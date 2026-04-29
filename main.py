@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from tdm_adapter import create_user_and_reservation
+from tdm_adapter import get_otp_code
 
 
 def main() -> None:
-    _, reservation_number = create_user_and_reservation()
-    print(reservation_number)
+    otp = get_otp_code("selvin.dhavidhu+zenqa@sixt.com")
+    print(otp)
 
 
 if __name__ == "__main__":
