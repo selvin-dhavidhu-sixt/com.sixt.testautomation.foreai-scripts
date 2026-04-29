@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import uuid
 from pathlib import Path
 from typing import TypedDict
@@ -485,3 +486,87 @@ def get_profiles_by_email_address(email: str) -> ProfilesByEmailResult:
     response.raise_for_status()
 
     return _profiles_by_email_from_response(response.json())
+
+
+def get_otp_code(email_address: str) -> str:
+    """Get OTP from email server with authentication."""
+    if not isinstance(email_address, str):
+        raise TypeError("email_address must be a string")
+    email_address = email_address.strip().lower()
+    if not email_address:
+        raise ValueError("email_address must be a non-empty string")
+
+    email_search_url = require_env("TEST_PARAM_EMAIL_SEARCH_URL")
+
+    bearer_token = get_client_credentials_access_token()
+
+    # Wait and get emails
+    time.sleep(3)
+
+    email_response = requests.post(
+        email_search_url,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {bearer_token}",
+        },
+        json={"to": email_address},
+        timeout=HTTP_TIMEOUT_SECONDS,
+    )
+    email_response.raise_for_status()
+
+    email_payload = email_response.json()
+    if not isinstance(email_payload, dict):
+        raise RuntimeError("Email search response must be a JSON object")
+    emails = email_payload.get("emails", [])
+    if not isinstance(emails, list):
+        raise RuntimeError("Email search response 'emails' must be a JSON array")
+    if not emails:
+        raise ValueError("No emails found")
+
+    first = emails[0]
+    if not isinstance(first, dict):
+        raise RuntimeError("Email search response item must be a JSON object")
+    dtd = first.get("dynamic_template_data", {})
+    if not isinstance(dtd, dict):
+        raise RuntimeError("dynamic_template_data must be a JSON object")
+    otp = dtd.get("otp_code")
+    if not otp:
+        raise ValueError("OTP not found")
+    return str(otp)
+
+
+def get_otp_with_retries(
+    email_address: str,
+    retries: int = 10,
+    delay_seconds: int = 1,
+) -> str:
+    if isinstance(retries, bool) or isinstance(delay_seconds, bool):
+        raise TypeError("retries and delay_seconds must be integers, not bool")
+    if not isinstance(retries, int) or not isinstance(delay_seconds, int):
+        raise TypeError("retries and delay_seconds must be integers")
+    if retries < 1:
+        raise ValueError("retries must be at least 1")
+    if delay_seconds < 0:
+        raise ValueError("delay_seconds must be >= 0")
+
+    last_exception: BaseException | None = None
+
+    for attempt in range(1, retries + 1):
+        try:
+            return get_otp_code(email_address)
+        except (
+            KeyError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+            requests.RequestException,
+        ) as exc:
+            last_exception = exc
+            if attempt < retries:
+                time.sleep(delay_seconds)
+
+    if last_exception is not None:
+        raise last_exception
+
+    raise RuntimeError("Failed to retrieve OTP")
